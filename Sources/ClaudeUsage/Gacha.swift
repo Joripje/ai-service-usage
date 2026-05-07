@@ -42,16 +42,9 @@ enum Gacha {
     /// 평균 일일 적립의 몇 배를 1뽑기 비용으로 할지. 일주일에 2번 ≈ 3.5일치.
     static let pullCostDayMultiplier: Double = 3.5
 
-    /// 1뽑기 비용. 첫 7일은 `seedPullCost`, 이후 사용자 평균 일일 적립 × `pullCostDayMultiplier` (안전 범위 내).
-    static var pullCost: Int {
-        let s = Settings.shared
-        guard let firstAt = s.firstCreditedAt else { return seedPullCost }
-        let elapsed = Date().timeIntervalSince(firstAt)
-        if elapsed < calibrationGracePeriod { return seedPullCost }
-        guard s.coinsTotalEarned > 0 else { return seedPullCost }
-        let avgDaily = Double(s.coinsTotalEarned) / (elapsed / 86400)
-        return min(pullCostBounds.upperBound, max(pullCostBounds.lowerBound, Int(avgDaily * pullCostDayMultiplier)))
-    }
+    /// 1뽑기 비용. `seedPullCost` 고정 — 자동 보정은 "벌수록 비싸지는" 체감(#11/#12)으로 비활성화.
+    /// `calibrationGracePeriod`/`pullCostBounds`/`pullCostDayMultiplier`는 향후 재도입 여지로 남김.
+    static var pullCost: Int { seedPullCost }
 
     /// Rarity 가중 랜덤 → 등급 내 균등 랜덤. (kind, rarity) 결정만.
     static func drawKind<RNG: RandomNumberGenerator>(using rng: inout RNG) -> (PetKind, Rarity) {
