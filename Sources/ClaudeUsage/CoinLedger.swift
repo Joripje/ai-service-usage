@@ -95,6 +95,12 @@ final class CoinLedger {
     ///   linear가 아닌 concave(sqrt) 곡선 — 초반 적립률↑/후반 적립률↓, 양 끝(0%, 100%)은 고정.
     /// - `resetAt`이 변경되면 새 윈도우 시작 → baseline만 갱신.
     /// - 첫 폴링은 baseline만 기록 (소급 적립 방지).
+    ///
+    /// `resetAt`은 매 폴링마다 sub-second 단위로 살짝 흔들려서 정확비교(`==`)는 거의 일치
+    /// 안 함 → 같은 윈도우인데도 baseline만 매번 갱신되어 적립이 0이 되는 버그가 있었음.
+    /// `NotificationManager`와 동일한 60초 슬랙으로 비교. 윈도우 길이가 5h/7d라 새 윈도우의
+    /// resetAt이 슬랙에 걸릴 수치적 가능성 없음. `pct > lastPct` 가드가 reset 후 pct 감소를
+    /// 자동 차단하므로 슬랙을 늘려도 중복 지급 경로는 닫혀 있음.
     func evaluateClaude(snapshot: UsageSnapshot) {
         let s = Settings.shared
         let multiplier = Self.planMultiplier(snapshot.planName)
@@ -102,7 +108,7 @@ final class CoinLedger {
         if let resetAt = snapshot.fiveHourResetAt, let pct = snapshot.fiveHourPct {
             if let lastReset = s.lastClaudeFiveHourReset,
                let lastPct = s.lastClaudeFiveHourPctSeen,
-               resetAt == lastReset, pct > lastPct {
+               abs(lastReset.timeIntervalSince(resetAt)) <= 60, pct > lastPct {
                 let prev = Self.curve(lastPct / 100.0) * Self.claudeFiveHourMaxCoin
                 let curr = Self.curve(pct / 100.0) * Self.claudeFiveHourMaxCoin
                 let raw = (curr - prev) * multiplier
@@ -120,7 +126,7 @@ final class CoinLedger {
         if let resetAt = snapshot.sevenDayResetAt, let pct = snapshot.sevenDayPct {
             if let lastReset = s.lastClaudeSevenDayReset,
                let lastPct = s.lastClaudeSevenDayPctSeen,
-               resetAt == lastReset, pct > lastPct {
+               abs(lastReset.timeIntervalSince(resetAt)) <= 60, pct > lastPct {
                 let prev = Self.curve(lastPct / 100.0) * Self.claudeSevenDayMaxCoin
                 let curr = Self.curve(pct / 100.0) * Self.claudeSevenDayMaxCoin
                 let raw = (curr - prev) * multiplier
