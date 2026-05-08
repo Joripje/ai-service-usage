@@ -745,6 +745,11 @@ private struct CollectionBadge: View {
 
 /// 뱃지 호버 popover 내용. 시스템 popover 안에서 렌더링되므로 ScrollView clip 영향 없음.
 /// 컴플리트 조건(어떤 펫을 모아야 하는지)을 멤버 sprite + 이름 + 보유 ✓로 명시.
+///
+/// `@MainActor` 명시 — `spriteThumb`가 `PetSprite.image(...)`를 호출하는데, GitHub Actions의
+/// 엄격한 Swift concurrency 체크가 SwiftUI View의 `@ViewBuilder` 메서드를 nonisolated로
+/// 추론해서 actor 위반 에러를 냈음 (로컬 빌드는 통과). 명시적으로 격리.
+@MainActor
 private struct CollectionBadgeTooltip: View {
     let collection: PetCollection
     let isComplete: Bool
