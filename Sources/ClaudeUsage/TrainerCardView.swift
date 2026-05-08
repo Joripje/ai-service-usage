@@ -4,6 +4,12 @@ import SwiftUI
 ///
 /// 자체 데이터 의존 없는 pure view (모든 입력은 init 인자) — `ImageRenderer`로 captureable.
 /// 호출 측(`ReportView`)이 `Settings`에서 stats를 계산해 주입.
+///
+/// `@MainActor` 명시 — `PetSprite.image(...)` / `TrainerBackground.fillTopColor` 등
+/// MainActor 격리된 메서드를 호출하는데, GitHub Actions의 strict concurrency 체크가
+/// SwiftUI View struct의 `@ViewBuilder` 메서드를 nonisolated로 추론해 actor 위반 에러를 냄
+/// (로컬 빌드는 통과). v0.6.10 `CollectionBadgeTooltip`과 동일 패턴.
+@MainActor
 struct TrainerCardView: View {
     let card: TrainerCard
     let trainerID: String

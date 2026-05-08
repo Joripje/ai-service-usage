@@ -6,6 +6,10 @@ import AppKit
 /// 좌상단 카드 미리보기 (압축 표시) → 아래 customization 섹션들 → 마지막 공유 버튼 row.
 /// 가챠 탭 컨테이너(`width: 480`) 안에 들어가므로 카드는 0.85 scale로 압축, 공유 export 시엔
 /// `TrainerCardView.standardWidth`로 캡처.
+///
+/// `@MainActor` 명시 — `Settings` 직접 접근 + MainActor 격리 enum의 unlock/compute 호출.
+/// `TrainerCardView`와 동일 이유 (CI strict concurrency).
+@MainActor
 struct ReportView: View {
     @ObservedObject var settings = Settings.shared
 
