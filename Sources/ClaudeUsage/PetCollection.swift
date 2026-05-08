@@ -78,6 +78,24 @@ enum PetCollection: String, CaseIterable, Codable {
         }
     }
 
+    /// 뱃지 가운데에 들어가는 SF Symbol — 코드네임의 dev 농담을 시각화.
+    /// 가능한 한 의미적 매핑 (예: tokenBurners → flame, noVerify → bolt.slash).
+    var iconSystemImage: String {
+        switch self {
+        case .mainframe:        return "server.rack"                        // 빈티지 대형 시스템
+        case .dns:              return "network"                            // 네트워크/DNS
+        case .npmInstall:       return "hourglass"                          // 영원한 기다림
+        case .nodeModules:      return "shippingbox.fill"                   // 무거운 박스
+        case .todoSince2019:    return "note.text"                          // 박힌 메모
+        case .wontfix:          return "exclamationmark.bubble.fill"        // 닫혀도 살아 돌아옴
+        case .fridayDeploy:     return "calendar.badge.exclamationmark"     // 금요일 + 위험
+        case .vibeCoders:       return "music.note"                         // 그냥 vibe로
+        case .tokenBurners:     return "flame.fill"                         // 토큰 태우기
+        case .rustEvangelists:  return "wrench.and.screwdriver.fill"        // systems programming
+        case .noVerify:         return "bolt.slash.fill"                    // hook 무시
+        }
+    }
+
     /// 도감 정렬 순서로 멤버 펫 반환 — 컬렉션 카드의 멤버 미리보기 그리드 순서와 일치.
     /// 각 멤버의 rarity는 `Gacha.pool` 역인덱스로 계산하므로 여기서는 순수 멤버십만 정의.
     var members: [PetKind] {

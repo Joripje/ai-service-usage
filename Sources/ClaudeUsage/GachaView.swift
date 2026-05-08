@@ -444,9 +444,9 @@ struct GachaView: View {
 
     // MARK: - Collections (셋 보너스 업적)
 
-    /// 펫 컬렉션(셋 보너스) 진행 카드 11개. 완성된 그룹은 accentColor + ✓ +완성일,
-    /// 미완성은 회색 + 진행도(`5/8`). 모든 11개 그룹을 항상 노출 — 미완성도 농담 부분
-    /// (subtitle)이 보여야 컬렉션 자체가 동기 부여 역할.
+    /// 펫 컬렉션(셋 보너스) 뱃지 그리드 11개. 완성된 그룹은 accentColor + ✓,
+    /// 미완성은 회색 + 진행도(`5/8`). 코드네임/농담/보너스는 호버 시 `.help` tooltip으로 노출
+    /// — 뱃지 자체는 작고 균일한 사이즈(56px)로 깔끔하게 통일.
     private func collectionsAchievementSection() -> some View {
         let totalCompleted = settings.completedCollections.count
         let totalCollections = PetCollection.allCases.count
@@ -462,9 +462,9 @@ struct GachaView: View {
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
             }
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 8)], spacing: 8) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 64), spacing: 10)], spacing: 12) {
                 ForEach(PetCollection.allCases, id: \.self) { c in
-                    CollectionCard(collection: c, settings: settings)
+                    CollectionBadge(collection: c, settings: settings)
                 }
             }
         }
@@ -647,11 +647,15 @@ private struct CollectionCompleteBanner: View {
     }
 }
 
-/// 컬렉션 업적 카드. 완성: accentColor 배경 + ✓ + 완성일자. 미완성: 회색 + 진행도.
-/// `subtitle`은 항상 노출 — 컬렉션의 정체성(농담)이 진행 상태와 무관히 보여야 동기 유발.
-private struct CollectionCard: View {
+/// 컬렉션 업적 뱃지. 원형 48px + SF Symbol + 진행도 caption — 카드보다 균일하고 컴팩트.
+/// 호버 시 popover로 displayName/subtitle/진행도/보너스 노출. `.help` modifier는 ScrollView
+/// 내부 LazyVGrid에서 hit-test가 안 잡히는 케이스가 있어 `.onHover` + `.popover` 조합으로
+/// 직접 우회. 미완성은 회색, 완성은 `accentColor`.
+private struct CollectionBadge: View {
     let collection: PetCollection
     @ObservedObject var settings: Settings
+
+    @State private var hovering: Bool = false
 
     private static let completedAtFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -662,51 +666,178 @@ private struct CollectionCard: View {
     var body: some View {
         let isComplete = settings.completedCollections.contains(collection.rawValue)
         let progress = collection.progress(settings)
-        let bg = isComplete ? collection.accentColor : Color.gray
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 4) {
+        let color: Color = isComplete ? collection.accentColor : Color.gray
+
+        VStack(spacing: 4) {
+            ZStack(alignment: .topTrailing) {
+                // 입체감 = (1) 위→아래 linear gradient (밝 → 어둡) +
+                //         (2) 좌상단 plusLighter radial 하이라이트 +
+                //         (3) drop shadow.
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                color.opacity(isComplete ? 1.00 : 0.40),
+                                color.opacity(isComplete ? 0.65 : 0.20),
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .frame(width: 48, height: 48)
+                    .overlay(
+                        // 좌상단 광택 — plusLighter blend로 밝게 보이는 spec highlight.
+                        Circle()
+                            .fill(
+                                RadialGradient(
+                                    colors: [.white.opacity(isComplete ? 0.50 : 0.22), .clear],
+                                    center: UnitPoint(x: 0.30, y: 0.22),
+                                    startRadius: 1,
+                                    endRadius: 18
+                                )
+                            )
+                            .frame(width: 48, height: 48)
+                            .blendMode(.plusLighter)
+                            .allowsHitTesting(false)
+                    )
+                    .overlay(
+                        Circle()
+                            .stroke(color.opacity(isComplete ? 0.95 : 0.45), lineWidth: 1.0)
+                    )
+                    .shadow(color: color.opacity(isComplete ? 0.55 : 0.18), radius: 4, x: 0, y: 2)
+                Image(systemName: collection.iconSystemImage)
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(.white.opacity(isComplete ? 1.0 : 0.70))
+                    .shadow(color: .black.opacity(0.30), radius: 1, x: 0, y: 0.5)
+                    .frame(width: 48, height: 48)
+                    .allowsHitTesting(false)
                 if isComplete {
-                    Image(systemName: "checkmark.seal.fill")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(.white)
+                    // 완성 표식 — 우상단 노란 체크. 뱃지 가장자리 살짝 넘게 배치.
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.yellow)
+                        .background(Circle().fill(Color.black.opacity(0.55)))
+                        .offset(x: 4, y: -4)
+                        .allowsHitTesting(false)
                 }
+            }
+            Text(isComplete ? "✓" : "\(progress.collected)/\(progress.total)")
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .foregroundStyle(isComplete ? color : .secondary)
+                .monospacedDigit()
+        }
+        .frame(width: 60, height: 70)
+        // hit-test 영역을 frame 전체(원 + caption)로 — background가 없는 VStack은 hover 감지가
+        // 자식 view 영역으로만 한정되므로 명시.
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+        .popover(isPresented: $hovering, arrowEdge: .top) {
+            CollectionBadgeTooltip(
+                collection: collection,
+                isComplete: isComplete,
+                progress: progress,
+                completedAt: settings.collectionCompletedAt[collection.rawValue],
+                ownedPets: settings.ownedPets
+            )
+        }
+    }
+}
+
+/// 뱃지 호버 popover 내용. 시스템 popover 안에서 렌더링되므로 ScrollView clip 영향 없음.
+/// 컴플리트 조건(어떤 펫을 모아야 하는지)을 멤버 sprite + 이름 + 보유 ✓로 명시.
+private struct CollectionBadgeTooltip: View {
+    let collection: PetCollection
+    let isComplete: Bool
+    let progress: (collected: Int, total: Int)
+    let completedAt: Date?
+    let ownedPets: [PetKind: PetOwnership]
+
+    private static let dateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy.MM.dd"
+        return f
+    }()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // 헤더: 아이콘 + 코드네임 + 진행도.
+            HStack(spacing: 6) {
+                Image(systemName: collection.iconSystemImage)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(collection.accentColor)
                 Text(collection.displayName)
-                    .font(.system(size: 12, weight: .bold, design: .monospaced))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                Spacer(minLength: 0)
+                    .font(.system(size: 13, weight: .bold, design: .monospaced))
+                Spacer(minLength: 4)
                 Text("\(progress.collected)/\(progress.total)")
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.85))
-                    .monospacedDigit()
+                    .font(.caption.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(isComplete ? collection.accentColor : .secondary)
             }
             Text(collection.subtitle)
-                .font(.caption2)
-                .foregroundStyle(.white.opacity(0.85))
-                .lineLimit(2)
-                .truncationMode(.tail)
-            if isComplete, let date = settings.collectionCompletedAt[collection.rawValue] {
-                Text("\(Self.completedAtFormatter.string(from: date)) · +\(collection.bonusCoins)")
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.75))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Divider()
+            // 멤버 리스트 — sprite + 한국어 이름 + 보유 체크. 컴플리트 조건이 명시적으로 보임.
+            VStack(alignment: .leading, spacing: 3) {
+                ForEach(collection.members) { kind in
+                    let owned = (ownedPets[kind]?.count ?? 0) > 0
+                    HStack(spacing: 6) {
+                        spriteThumb(kind: kind, owned: owned)
+                        Text(kind.displayName)
+                            .font(.caption2)
+                            .foregroundStyle(owned ? .primary : .secondary)
+                        Spacer(minLength: 0)
+                        Image(systemName: owned ? "checkmark.circle.fill" : "circle")
+                            .font(.system(size: 10))
+                            .foregroundStyle(owned ? .green : .secondary.opacity(0.5))
+                    }
+                }
+            }
+            Divider()
+            // 상태/보너스
+            if isComplete {
+                HStack(spacing: 4) {
+                    Image(systemName: "checkmark.seal.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.green)
+                    Text("컴플리트")
+                        .font(.caption.weight(.semibold))
+                    if let date = completedAt {
+                        Text("· \(Self.dateFormatter.string(from: date))")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Text("+\(collection.bonusCoins) coin 적립됨")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
             } else {
-                // 미완성도 동일 높이 유지 — 카드 크기 jitter 방지.
-                Text("+\(collection.bonusCoins) coin")
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.65))
+                Text("완성 시 +\(collection.bonusCoins) coin")
+                    .font(.caption2.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(collection.accentColor)
             }
         }
-        .padding(8)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 8).fill(bg.opacity(isComplete ? 0.95 : 0.55)))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(isComplete ? bg : Color.gray.opacity(0.3), lineWidth: 1)
-        )
-        .help(isComplete
-              ? "\(collection.displayName) 컴플리트 — \(collection.bonusCoins) 코인 적립"
-              : "\(progress.collected)/\(progress.total) 보유 · 완성 시 +\(collection.bonusCoins) 코인")
+        .padding(12)
+        .frame(width: 240, alignment: .leading)
+    }
+
+    /// 멤버 펫의 미니 sprite. 보유: 컬러 + 외곽선, 미보유: 흑백 + 흐림.
+    @ViewBuilder
+    private func spriteThumb(kind: PetKind, owned: Bool) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 3)
+                .fill(Color.secondary.opacity(0.10))
+            if let img = PetSprite.image(for: kind, action: .sit, frameIndex: 0) {
+                Image(nsImage: img)
+                    .resizable()
+                    .interpolation(.none)
+                    .aspectRatio(contentMode: .fit)
+                    .padding(1)
+                    .colorMultiply(owned ? .white : .black)
+                    .opacity(owned ? 1.0 : 0.45)
+            }
+        }
+        .frame(width: 18, height: 18)
     }
 }
 
