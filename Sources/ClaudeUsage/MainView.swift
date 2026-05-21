@@ -133,6 +133,7 @@ struct MainView: View {
     var onSettings: () -> Void
     var onContributors: () -> Void
     var onBugReport: () -> Void
+    var onDailyFortune: () -> Void
     var onQuit: () -> Void
 
     var body: some View {
@@ -203,6 +204,24 @@ struct MainView: View {
             }
             .buttonStyle(.borderless)
             .help(vm.boardUnreadCount > 0 ? "게시판 (미확인 \(vm.boardUnreadCount)개)" : "게시판 열기")
+            // 오늘의 개발 운세 — 게시판 옆. 오늘 한 번도 안 봤으면 빨간 dot 배지.
+            Button {
+                onDailyFortune()
+            } label: {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color(red: 1.0, green: 0.78, blue: 0.2))   // 금색 — hud 패널에서 가장 잘 보임
+                    .overlay(alignment: .topTrailing) {
+                        if !Calendar.current.isDateInToday(settings.dailyFortuneLastShownDate ?? .distantPast) {
+                            Circle()
+                                .fill(Color.red)
+                                .frame(width: 5, height: 5)
+                                .offset(x: 4, y: -2)
+                        }
+                    }
+            }
+            .buttonStyle(.borderless)
+            .help("오늘의 개발 운세")
             if vm.claudeLoading || vm.cursorLoading {
                 ProgressView().controlSize(.mini)
             }

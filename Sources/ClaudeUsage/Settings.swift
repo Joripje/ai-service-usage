@@ -131,6 +131,12 @@ final class Settings: ObservableObject {
         didSet { UserDefaults.standard.set(lastWellnessShownAt, forKey: Keys.lastWellnessShownAt) }
     }
 
+    /// 오늘의 개발 운세 윈도우를 마지막으로 연 날짜. topBar 의 빨간 dot 배지 표시 여부 결정.
+    /// 실제 운세 캐시는 Supabase `daily_fortunes` 에 — 여기엔 dot 배지 dedup 용 마지막 표시일자만.
+    @Published var dailyFortuneLastShownDate: Date? {
+        didSet { UserDefaults.standard.set(dailyFortuneLastShownDate, forKey: Keys.dailyFortuneLastShownDate) }
+    }
+
     // MARK: - 도장 (Gym Badges)
     //
     // 8 카테고리 × 4 tier = 32 뱃지 + 챔피언 1 = 33. 각 카테고리는 별도 카운터/metric을 갖고,
@@ -250,6 +256,11 @@ final class Settings: ObservableObject {
     /// 연결된 GitHub user id — login 변경에 안전한 식별자.
     @Published var githubUserID: Int? {
         didSet { UserDefaults.standard.set(githubUserID, forKey: Keys.githubUserID) }
+    }
+    /// GitHub 계정 생성 시각(ISO 8601 UTC). "오늘의 개발 운세" 의 사주 "생년월일" 로 사용.
+    /// 한번 받아 두면 변하지 않음 — 토큰 갱신 때마다 다시 fetch 하지 않음.
+    @Published var githubCreatedAt: String? {
+        didSet { UserDefaults.standard.set(githubCreatedAt, forKey: Keys.githubCreatedAt) }
     }
     /// 이미 보너스가 적립된 PR 번호 집합 (dedupe). 한번 들어가면 영구 보존 — 계정 갈아끼워도 재지급 안 됨.
     @Published var creditedPRNumbers: Set<Int> {
@@ -384,9 +395,11 @@ final class Settings: ObservableObject {
         self.coinsTotalEarned = (d.object(forKey: Keys.coinsTotalEarned) as? Int) ?? 0
         self.firstCreditedAt = d.object(forKey: Keys.firstCreditedAt) as? Date
         self.lastWellnessShownAt = d.object(forKey: Keys.lastWellnessShownAt) as? Date
+        self.dailyFortuneLastShownDate = d.object(forKey: Keys.dailyFortuneLastShownDate) as? Date
 
         self.githubLogin = d.string(forKey: Keys.githubLogin)
         self.githubUserID = (d.object(forKey: Keys.githubUserID) as? Int)
+        self.githubCreatedAt = d.string(forKey: Keys.githubCreatedAt)
         let creditedData = d.data(forKey: Keys.creditedPRNumbers)
         self.creditedPRNumbers = (creditedData.flatMap { try? JSONDecoder().decode(Set<Int>.self, from: $0) }) ?? []
 
@@ -632,6 +645,7 @@ final class Settings: ObservableObject {
         ContributorBonus.shared.updateToken(nil)
         githubLogin = nil
         githubUserID = nil
+        githubCreatedAt = nil
     }
 
     /// 랭킹 계정 로컬 상태 클리어. 서버측 데이터 삭제는 별도 `RankingAPI.deleteAccount()` 호출
@@ -716,6 +730,8 @@ final class Settings: ObservableObject {
         static let coinsTotalEarned            = "settings.coinsTotalEarned"
         static let firstCreditedAt             = "settings.firstCreditedAt"
         static let lastWellnessShownAt         = "settings.lastWellnessShownAt"
+        static let dailyFortuneLastShownDate   = "settings.dailyFortuneLastShownDate"
+        static let githubCreatedAt             = "settings.githubCreatedAt"
         static let petUsageSeconds             = "settings.petUsageSeconds"
         static let pendingHighlights           = "settings.pendingHighlights"
         static let hasReceivedV032TicketBonus  = "settings.hasReceivedV032TicketBonus"

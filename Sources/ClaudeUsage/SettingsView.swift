@@ -324,6 +324,8 @@ private struct GitHubLinkView: View {
                 ContributorBonus.shared.updateToken(token)
                 settings.githubLogin = user.login
                 settings.githubUserID = user.id
+                // 오늘의 개발 운세에서 사주 "생년월일" 로 활용. 한번 받아두면 변하지 않음.
+                settings.githubCreatedAt = user.createdAt
                 state = .idle
                 // 연결 직후 첫 sync — 과거 PR 일괄 보너스 트리거.
                 await ContributorBonus.shared.sync()

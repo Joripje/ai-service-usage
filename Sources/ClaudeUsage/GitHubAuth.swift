@@ -30,6 +30,13 @@ actor GitHubAuth {
     struct GitHubUser: Decodable, Sendable {
         let login: String
         let id: Int
+        /// 계정 생성 시각 (ISO 8601 UTC, 예: "2018-03-14T10:23:45Z"). 사주 "생년월일" 으로 활용.
+        let createdAt: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case login, id
+            case createdAt = "created_at"
+        }
     }
 
     enum AuthError: LocalizedError {

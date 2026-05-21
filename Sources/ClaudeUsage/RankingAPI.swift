@@ -451,6 +451,50 @@ actor RankingAPI {
         return try await execute(req)
     }
 
+    // MARK: - 오늘의 개발 운세
+
+    /// `daily_fortunes` row. 서버측에서 camelCase 변환 + `sajuJson` 은 다시 문자열로 직렬화.
+    struct FortuneRow: Decodable, Sendable {
+        let deviceId: String
+        let fortuneDate: String     // "YYYY-MM-DD"
+        let sajuJson: String        // SajuChart JSON
+        let fortuneText: String
+        let model: String?
+        let createdAt: Date
+        let cached: Bool            // 서버 캐시 hit 였는지 — 클라이언트 표시용 (선택)
+    }
+
+    struct FortuneResponse: Decodable, Sendable {
+        let row: FortuneRow
+    }
+
+    private struct FortunePayload: Encodable {
+        let date: String
+        let dailyJson: String
+        let deviceId: String
+        let sajuJson: String
+        let ts: Int64
+    }
+    private struct FortuneRequest: Encodable {
+        let payload: FortunePayload
+        let signature: String
+    }
+
+    /// 운세 한 번에 요청 — 서버가 (deviceId, date) row 조회 → 없으면 OpenAI 호출 → save → 반환.
+    /// OpenAI 키는 서버 환경변수에 박혀 있어 클라이언트가 알 필요 없음.
+    /// `sajuJson`/`dailyJson` 은 클라이언트가 결정론적 계산 후 JSON 문자열로 전달 (프롬프트 변수).
+    func requestFortune(deviceId: String, hmacKeyBase64: String, date: String,
+                        sajuJson: String, dailyJson: String) async throws -> FortuneRow {
+        let payload = FortunePayload(
+            date: date, dailyJson: dailyJson, deviceId: deviceId,
+            sajuJson: sajuJson, ts: Int64(Date().timeIntervalSince1970)
+        )
+        let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
+        let req = FortuneRequest(payload: payload, signature: sig)
+        let resp: FortuneResponse = try await post(path: "fortune", body: req, signed: true)
+        return resp.row
+    }
+
     private func execute<Resp: Decodable>(_ req: URLRequest) async throws -> Resp {
         let (data, response): (Data, URLResponse)
         do {
