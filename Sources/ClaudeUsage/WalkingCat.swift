@@ -531,11 +531,10 @@ final class PetController: ObservableObject {
         guard timer == nil else { return }
         lastTick = Date()
         actionUntil = lastTick   // 즉시 첫 액션 결정
-        // Timer block은 RunLoop.main 에서 실행되므로 이미 main thread.
-        // Task { @MainActor in ... } 로 hop 하면 strict concurrency 에서 self capture
-        // 위반 → MainActor.assumeIsolated 로 직접 호출.
+        // Swift 6 / macOS 26 런타임에서 Timer block 안의 MainActor.assumeIsolated 는
+        // main executor 보장이 없어 SIGSEGV (issue #16). DispatchQueue.main 으로 명시적 hop.
         let t = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated {
+            DispatchQueue.main.async { @MainActor in
                 self?.tick()
             }
         }

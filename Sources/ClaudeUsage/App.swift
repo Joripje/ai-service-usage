@@ -290,8 +290,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         stopMenuBarPetTimer()
         menuBarLastTick = Date()
         menuBarFrameAccum = 0
+        // Swift 6 / macOS 26 런타임에서 Timer block 안의 MainActor.assumeIsolated 는
+        // main executor 보장이 없어 SIGSEGV (issue #16). DispatchQueue.main 으로 명시적 hop.
         let t = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.menuBarPetTick() }
+            DispatchQueue.main.async { @MainActor in self?.menuBarPetTick() }
         }
         RunLoop.main.add(t, forMode: .common)
         menuBarPetTimer = t

@@ -26,8 +26,10 @@ enum TUIApp {
         vm.startPolling()
 
         // 1초마다 다시 그림 (countdown 등 라이브 표시 위해).
+        // Swift 6 / macOS 26 런타임에서 Timer block 안의 MainActor.assumeIsolated 는
+        // main executor 보장이 없어 SIGSEGV (issue #16). DispatchQueue.main 으로 명시적 hop.
         let renderTimer = Timer(timeInterval: 1.0, repeats: true) { _ in
-            MainActor.assumeIsolated { Renderer.draw(vm: vm) }
+            DispatchQueue.main.async { @MainActor in Renderer.draw(vm: vm) }
         }
         RunLoop.main.add(renderTimer, forMode: .common)
         Renderer.draw(vm: vm)
@@ -37,7 +39,7 @@ enum TUIApp {
         src.setEventHandler {
             var byte: UInt8 = 0
             while read(STDIN_FILENO, &byte, 1) == 1 {
-                MainActor.assumeIsolated { handleKey(byte, vm: vm) }
+                DispatchQueue.main.async { @MainActor in handleKey(byte, vm: vm) }
             }
         }
         src.resume()
