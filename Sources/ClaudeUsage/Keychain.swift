@@ -21,10 +21,41 @@ enum Keychain {
     static func clear() { clearItem(account: claudeAccount) }
 
     // MARK: - GitHub token
+    //
+    // HMAC키와 동일한 사유 — ad-hoc 서명 환경에서 binary 교체 후 ACL 깨지면 매 keychain
+    // 접근마다 사용자 다이얼로그 트리거. SettingsView/DailyFortuneView/ContributorBonus/복구
+    // 흐름이 각자 load를 치는데 캐시 없이는 process당 4+회 접근. in-memory 캐시로 1회로 축소.
+    // ContributorBonus의 자체 캐시는 그대로 두어도 무해 (첫 hit 후 둘 다 cache hit).
 
-    static func saveGitHubToken(_ value: String) { saveItem(value, account: githubAccount) }
-    static func loadGitHubToken() -> String? { loadItem(account: githubAccount) }
-    static func clearGitHubToken() { clearItem(account: githubAccount) }
+    private static let _githubTokenQueue = DispatchQueue(label: "Keychain.githubToken.cache")
+    private static var _cachedGitHubToken: String?
+    private static var _githubTokenLoaded: Bool = false
+
+    static func saveGitHubToken(_ value: String) {
+        saveItem(value, account: githubAccount)
+        _githubTokenQueue.sync {
+            _cachedGitHubToken = value
+            _githubTokenLoaded = true
+        }
+    }
+
+    static func loadGitHubToken() -> String? {
+        _githubTokenQueue.sync {
+            if _githubTokenLoaded { return _cachedGitHubToken }
+            let v = loadItem(account: githubAccount)
+            _cachedGitHubToken = v
+            _githubTokenLoaded = true
+            return v
+        }
+    }
+
+    static func clearGitHubToken() {
+        clearItem(account: githubAccount)
+        _githubTokenQueue.sync {
+            _cachedGitHubToken = nil
+            _githubTokenLoaded = true   // 명시적 clear는 캐시도 nil — 다음 load가 prompt 없이 nil
+        }
+    }
 
     // MARK: - Ranking HMAC key
     //

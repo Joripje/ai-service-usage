@@ -37,7 +37,7 @@ Deno.serve(async (req: Request) => {
   const db = getDb();
   const { data: user } = await db
     .from("users")
-    .select("device_id, nickname, total_coins, status")
+    .select("device_id, nickname, total_coins, status, profile_json")
     .eq("recovery_code_hash", hash)
     .single();
 
@@ -54,10 +54,13 @@ Deno.serve(async (req: Request) => {
     return errorResponse(500, "rotation_failed");
   }
 
+  // profile_json 전체(backup 포함) 반환 — 새 디바이스가 펫 인벤토리·코인 잔액·설정 복원.
+  // leaderboard와 달리 본인 응답이므로 strip 안 함.
   return jsonResponse({
     deviceId: user.device_id,
     hmacKey: newKey,
     nickname: user.nickname,
     totalCoins: user.total_coins,
+    profileJson: user.profile_json,
   });
 });

@@ -347,6 +347,14 @@ private struct RankingSectionView: View {
         case idle
         case registering
         case error(String)
+        /// GitHub 복구 — device flow의 user_code 입력 대기 단계. URL은 항상 https://github.com/login/device.
+        case githubAuthWaiting(userCode: String, verificationURL: String)
+        /// 토큰 발급 후 peek-by-github 호출 중 (메타데이터 조회).
+        case githubPeeking
+        /// peek 응답 받음 — 사용자 컨펌 대기. token은 컨펌 시 recover 호출에 재사용.
+        case githubAuthConfirming(peek: RankingAPI.GitHubAccountPeek, token: String)
+        /// 컨펌 후 hmac_key rotation + 복원 진행 중.
+        case githubRecovering
     }
     @State private var state: FlowState = .idle
     @State private var nicknameInput: String = ""
@@ -355,6 +363,8 @@ private struct RankingSectionView: View {
     @State private var recoveryInput: String = ""
     @State private var showRecoveryEntry: Bool = false
     @State private var confirmDelete: Bool = false
+    /// GitHub device flow 폴링 task — 사용자가 시트 닫거나 취소하면 cancel.
+    @State private var githubPollTask: Task<Void, Never>? = nil
 
     var body: some View {
         if !RankingAPI.isConfigured {
@@ -373,8 +383,6 @@ private struct RankingSectionView: View {
     private var optInView: some View {
         VStack(alignment: .leading, spacing: 8) {
             switch state {
-            case .idle:
-                idleOptInView
             case .registering:
                 HStack { ProgressView().controlSize(.small); Text("등록 중...").font(.system(size: 11)) }
             case .error(let msg):
@@ -382,6 +390,9 @@ private struct RankingSectionView: View {
                     Text("실패: \(msg)").font(.system(size: 11)).foregroundStyle(.red)
                     Button("다시 시도") { state = .idle }
                 }
+            default:
+                // .idle + githubAuth* (sheet 안에서 처리되는 상태들).
+                idleOptInView
             }
         }
     }
@@ -534,23 +545,108 @@ private struct RankingSectionView: View {
     private var recoveryEntrySheet: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("이전 계정 불러오기").font(.system(size: 13, weight: .semibold))
-            Text("등록 시 발급된 복구 코드를 입력하거나 같은 GitHub 계정으로 인증하세요.")
-                .font(.system(size: 11)).foregroundStyle(.secondary)
-            TextField("XXXX-XXXX-XXXX", text: $recoveryInput)
-                .textFieldStyle(.roundedBorder)
-                .font(.system(size: 12, design: .monospaced))
-            HStack {
-                Button("코드로 복구") { recoverWithCode() }
-                    .disabled(recoveryInput.count < 8)
-                if settings.githubLogin != nil {
-                    Button("GitHub으로 복구") { recoverWithGitHub() }
+
+            switch state {
+            case .githubAuthWaiting(let userCode, let verificationURL):
+                githubWaitingBody(userCode: userCode, verificationURL: verificationURL)
+            case .githubPeeking:
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("계정 정보 확인 중…").font(.system(size: 11))
                 }
-                Spacer()
-                Button("닫기") { showRecoveryEntry = false }
+                .padding(.vertical, 8)
+            case .githubAuthConfirming(let peek, let token):
+                githubConfirmBody(peek: peek, token: token)
+            case .githubRecovering:
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("계정 복구 중…").font(.system(size: 11))
+                }
+                .padding(.vertical, 8)
+            default:
+                Text("등록 시 발급된 복구 코드를 입력하거나 같은 GitHub 계정으로 인증하세요.")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                TextField("XXXX-XXXX-XXXX", text: $recoveryInput)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 12, design: .monospaced))
+                if case .error(let msg) = state {
+                    Text(msg).font(.system(size: 10)).foregroundStyle(.red)
+                }
+                HStack {
+                    Button("코드로 복구") { recoverWithCode() }
+                        .disabled(recoveryInput.count < 8)
+                    if GitHubAuth.isConfigured {
+                        Button("GitHub으로 복구") { recoverWithGitHub() }
+                    }
+                    Spacer()
+                    Button("닫기") {
+                        githubPollTask?.cancel()
+                        state = .idle
+                        showRecoveryEntry = false
+                    }
+                }
             }
         }
         .padding(16)
         .frame(width: 360)
+    }
+
+    @ViewBuilder
+    private func githubConfirmBody(peek: RankingAPI.GitHubAccountPeek, token: String) -> some View {
+        let fmt: DateFormatter = {
+            let f = DateFormatter()
+            f.locale = Locale(identifier: "ko_KR")
+            f.dateFormat = "yyyy년 M월 d일 HH:mm"
+            return f
+        }()
+        Text("\(fmt.string(from: peek.backupAt)) 시점으로 유저 정보를 복원합니다.")
+            .font(.system(size: 12))
+        VStack(alignment: .leading, spacing: 2) {
+            Text("닉네임: \(peek.nickname)").font(.system(size: 11)).foregroundStyle(.secondary)
+            Text("GitHub: @\(peek.githubLogin)").font(.system(size: 11)).foregroundStyle(.secondary)
+            Text("누적 점수: \(peek.totalCoins.formatted())").font(.system(size: 11)).foregroundStyle(.secondary)
+        }
+        Text("현재 디바이스의 진행도와 합쳐서 더 많은 쪽이 보존됩니다.")
+            .font(.system(size: 10)).foregroundStyle(.secondary)
+        HStack {
+            Button("복원 진행") { performGitHubRestore(token: token) }
+                .keyboardShortcut(.defaultAction)
+            Button("취소") {
+                githubPollTask?.cancel()
+                state = .idle
+            }
+            Spacer()
+        }
+    }
+
+    @ViewBuilder
+    private func githubWaitingBody(userCode: String, verificationURL: String) -> some View {
+        Text("GitHub에서 아래 코드를 입력하세요.")
+            .font(.system(size: 11)).foregroundStyle(.secondary)
+        HStack {
+            Text(userCode)
+                .font(.system(size: 18, weight: .semibold, design: .monospaced))
+                .textSelection(.enabled)
+            Spacer()
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(userCode, forType: .string)
+            } label: { Image(systemName: "doc.on.doc") }
+                .buttonStyle(.borderless)
+                .help("코드 복사")
+        }
+        HStack(spacing: 8) {
+            Button("GitHub 열기") {
+                if let url = URL(string: verificationURL) { NSWorkspace.shared.open(url) }
+            }
+            Button("취소") {
+                githubPollTask?.cancel()
+                state = .idle
+            }
+            Spacer()
+        }
+        Text("브라우저에서 인증을 마치면 자동으로 복구가 시작됩니다.")
+            .font(.system(size: 10)).foregroundStyle(.secondary)
     }
 
     // MARK: - Actions
@@ -607,6 +703,9 @@ private struct RankingSectionView: View {
                 settings.rankingRegistered = true
                 settings.rankingEnabled = true
                 settings.rankingPrivacyAccepted = true
+                if let backup = resp.profileJson?.backup {
+                    settings.applyBackup(backup)
+                }
                 showRecoveryEntry = false
             } catch {
                 state = .error(error.localizedDescription)
@@ -615,14 +714,58 @@ private struct RankingSectionView: View {
         }
     }
 
+    /// GitHub 계정으로 이전 계정 복구 — 1단계: 토큰 확보 + peek로 메타 조회 → 컨펌 대기.
+    /// 실제 hmac_key rotation은 사용자 컨펌 후 `performGitHubRestore`에서.
     private func recoverWithGitHub() {
-        guard let token = Keychain.loadGitHubToken() else {
-            state = .error("GitHub 토큰이 없습니다. 먼저 GitHub 연동을 마치세요.")
+        guard GitHubAuth.isConfigured else {
+            state = .error("GitHub Client ID가 설정되지 않은 빌드입니다.")
             return
         }
-        let newDeviceId = settings.rankingDeviceID.isEmpty ? UUID().uuidString : settings.rankingDeviceID
-        Task { @MainActor in
+        githubPollTask?.cancel()
+        githubPollTask = Task { @MainActor in
             do {
+                let token: String
+                if let existing = Keychain.loadGitHubToken() {
+                    token = existing
+                } else {
+                    let code = try await GitHubAuth.shared.requestDeviceCode()
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(code.user_code, forType: .string)
+                    state = .githubAuthWaiting(userCode: code.user_code,
+                                               verificationURL: code.verification_uri)
+                    token = try await GitHubAuth.shared.pollForToken(
+                        deviceCode: code.device_code,
+                        interval: code.interval,
+                        expiresIn: code.expires_in
+                    )
+                    Keychain.saveGitHubToken(token)
+                    ContributorBonus.shared.updateToken(token)
+                    if let user = try? await GitHubAuth.shared.fetchUser(token: token) {
+                        settings.githubLogin = user.login
+                        settings.githubUserID = user.id
+                        settings.githubCreatedAt = user.createdAt
+                    }
+                }
+
+                // peek — 변경 없이 메타만 조회. 사용자 컨펌 후 실제 복원.
+                state = .githubPeeking
+                let peek = try await RankingAPI.shared.peekGitHubAccount(token: token)
+                state = .githubAuthConfirming(peek: peek, token: token)
+            } catch is CancellationError {
+                state = .idle
+            } catch {
+                state = .error(error.localizedDescription)
+            }
+        }
+    }
+
+    /// GitHub 복구 2단계: 사용자 컨펌 후 실제 hmac_key rotation + 백업 적용.
+    private func performGitHubRestore(token: String) {
+        githubPollTask?.cancel()
+        githubPollTask = Task { @MainActor in
+            do {
+                state = .githubRecovering
+                let newDeviceId = settings.rankingDeviceID.isEmpty ? UUID().uuidString : settings.rankingDeviceID
                 let resp = try await RankingAPI.shared.recoverWithGitHub(token: token, newDeviceId: newDeviceId)
                 Keychain.saveRankingHmacKey(resp.hmacKey)
                 settings.rankingDeviceID = resp.deviceId
@@ -632,10 +775,15 @@ private struct RankingSectionView: View {
                 settings.rankingRegistered = true
                 settings.rankingEnabled = true
                 settings.rankingPrivacyAccepted = true
+                if let backup = resp.profileJson?.backup {
+                    settings.applyBackup(backup)
+                }
+                state = .idle
                 showRecoveryEntry = false
+            } catch is CancellationError {
+                state = .idle
             } catch {
                 state = .error(error.localizedDescription)
-                showRecoveryEntry = false
             }
         }
     }

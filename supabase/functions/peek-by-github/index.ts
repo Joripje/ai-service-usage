@@ -1,17 +1,17 @@
-// POST /recover-by-github
-// 새 디바이스에서 사용자가 GitHub OAuth 토큰 → 서버가 GitHub API로 user 확인 후
-// github_user_id 매칭되는 user에 hmac_key 재발급.
+// POST /peek-by-github
+// GitHub OAuth 토큰으로 매칭되는 user 메타데이터 조회 — **변경 없음**.
+// 클라이언트가 복원 컨펌 다이얼로그("X 시점으로 유저정보 복원합니다") 표시용으로 호출.
+// 컨펌 후 실제 hmac_key rotation은 recover-by-github로.
 //
-// recovery code 분실 + 등록 시 GitHub 연동한 사용자의 fallback. 두 번째 복구 수단.
+// 분리 이유: peek 단계에서 rotation까지 하면 사용자가 컨펌 취소해도 기존 디바이스의
+// hmac_key가 이미 무효화됨. peek은 read-only로 두고 사용자 명시 액션에서만 rotate.
 
 import { jsonResponse, errorResponse, handleOptions } from "../_shared/cors.ts";
 import { getDb } from "../_shared/db.ts";
-import { generateHmacKeyB64 } from "../_shared/hmac.ts";
 import { fetchGitHubUser } from "../_shared/github.ts";
 
-interface RecoverByGitHubRequest {
+interface PeekRequest {
   githubToken: string;
-  newDeviceId?: string; // 호환 위해 받지만 사용 안 함.
 }
 
 Deno.serve(async (req: Request) => {
@@ -19,7 +19,7 @@ Deno.serve(async (req: Request) => {
   if (preflight) return preflight;
   if (req.method !== "POST") return errorResponse(405, "method_not_allowed");
 
-  let body: RecoverByGitHubRequest;
+  let body: PeekRequest;
   try {
     body = await req.json();
   } catch {
@@ -40,33 +40,19 @@ Deno.serve(async (req: Request) => {
   const db = getDb();
   const { data: user } = await db
     .from("users")
-    .select("device_id, nickname, total_coins, status, profile_json")
+    .select("nickname, total_coins, status, registered_at, last_submitted_at")
     .eq("github_user_id", gh.id)
     .single();
 
   if (!user) return errorResponse(404, "no_account_linked_to_github");
   if (user.status === "banned") return errorResponse(403, "banned");
 
-  const newKey = generateHmacKeyB64();
-  const { error } = await db
-    .from("users")
-    .update({
-      hmac_key_b64: newKey,
-      github_login: gh.login, // login 변경된 경우 갱신
-    })
-    .eq("device_id", user.device_id);
-  if (error) {
-    console.error("hmac rotation failed", error);
-    return errorResponse(500, "rotation_failed");
-  }
-
-  // profile_json 전체(backup 포함) 반환 — 새 디바이스가 펫 인벤토리·코인 잔액·설정 복원.
-  // leaderboard와 달리 본인 응답이므로 strip 안 함.
+  // last_submitted_at은 마지막 백업(submit) 시점 — 복원되는 상태의 의미상 timestamp.
+  // 첫 등록 후 한 번도 submit 안 한 사용자는 null → registered_at fallback.
   return jsonResponse({
-    deviceId: user.device_id,
-    hmacKey: newKey,
     nickname: user.nickname,
     totalCoins: user.total_coins,
-    profileJson: user.profile_json,
+    backupAt: user.last_submitted_at ?? user.registered_at,
+    githubLogin: gh.login,
   });
 });

@@ -689,6 +689,78 @@ final class Settings: ObservableObject {
         rankingPrivacyAccepted = false
     }
 
+    /// 새 디바이스 복구 직후 서버에서 받은 backup payload를 로컬 상태에 적용.
+    /// 정책: **로컬-우선 union/max** — 현재 디바이스에 이미 있는 진행도는 절대 후퇴시키지 않는다.
+    /// 두 디바이스 사용자가 한쪽에서 진행 → 다른쪽에서 복원하면 양쪽 합집합이 보존되도록.
+    ///   - count/coins/coinsTotalEarned: max(local, backup)
+    ///   - unlockedVariants/clearedBadges/completedCollections/ownedTitles/creditedPRNumbers/
+    ///     claimedPodiumPeriods/pendingHighlights/notifyThresholds: union
+    ///   - 펫 선택(kind/variant)·UI 설정(showMenuBar 등)·운세 dot 날짜: backup 값으로 overwrite
+    ///     (사용자 현재 설정이 디바이스 종속이라 백업 측 의도가 더 정확)
+    ///   - firstCreditedAt: min(local, backup) — 가장 이른 시점 우선
+    /// 옵셔널 필드가 nil이면 변경 없음 (옛 클라이언트가 만든 백업 호환).
+    func applyBackup(_ b: ProfileState.BackupPayload) {
+        // 펫 인벤토리 — count는 max, unlockedVariants는 union.
+        if let remote = b.ownedPets {
+            var merged = ownedPets
+            for (rawKind, remoteOwn) in remote {
+                guard let kind = PetKind(rawValue: rawKind) else { continue }
+                if var local = merged[kind] {
+                    local.count = max(local.count, remoteOwn.count)
+                    local.unlockedVariants.formUnion(remoteOwn.unlockedVariants)
+                    merged[kind] = local
+                } else {
+                    merged[kind] = remoteOwn
+                }
+            }
+            ownedPets = merged
+        }
+        if let remote = b.petUsageSeconds {
+            var merged = petUsageSeconds
+            for (rawKind, sec) in remote {
+                guard let kind = PetKind(rawValue: rawKind) else { continue }
+                merged[kind] = max(merged[kind] ?? 0, sec)
+            }
+            petUsageSeconds = merged
+        }
+        if let remote = b.pendingHighlights {
+            let kinds = remote.compactMap { PetKind(rawValue: $0) }
+            pendingHighlights.formUnion(kinds)
+        }
+
+        // 펫 선택 — backup 의도 우선.
+        if let raw = b.petClaudeKind, let k = PetKind(rawValue: raw) { petClaudeKind = k }
+        if let raw = b.petCursorKind, let k = PetKind(rawValue: raw) { petCursorKind = k }
+        if let v = b.petClaudeVariant { petClaudeVariant = v }
+        if let v = b.petCursorVariant { petCursorVariant = v }
+
+        // 경제 — 누적·잔액은 max로 (양쪽 진행 보존).
+        if let v = b.coins { coins = max(coins, v) }
+        if let v = b.gachaTickets { gachaTickets = max(gachaTickets, v) }
+        if let v = b.coinsTotalEarned { coinsTotalEarned = max(coinsTotalEarned, v) }
+        if let remote = b.firstCreditedAt {
+            firstCreditedAt = firstCreditedAt.map { min($0, remote) } ?? remote
+        }
+
+        // dedup 셋 — union. 한쪽에 들어간 적이 있으면 양쪽 다 들어가야 재지급 안 됨.
+        if let remote = b.claimedPodiumPeriods { claimedPodiumPeriods.formUnion(remote) }
+        if let remote = b.creditedPRNumbers { creditedPRNumbers.formUnion(remote) }
+        if let remote = b.completedCollections { completedCollections.formUnion(remote) }
+        if let remote = b.clearedBadges { clearedBadges.formUnion(remote) }
+        if let remote = b.ownedTitles { ownedTitles.formUnion(remote) }
+
+        // 사용자 설정 — backup 의도 우선.
+        if let v = b.notifyEnabled { notifyEnabled = v }
+        if let remote = b.notifyThresholds {
+            notifyThresholds = Array(Set(notifyThresholds).union(remote)).sorted()
+        }
+        if let v = b.showMenuBar { showMenuBar = v }
+        if let v = b.showGitHubLoginInCard { showGitHubLoginInCard = v }
+
+        // 운세 표시 dedup — backup 값 우선.
+        if let v = b.dailyFortuneLastShownDate { dailyFortuneLastShownDate = v }
+    }
+
     /// 도감 슬롯 클릭 시 호출 — 그 펫의 강조 표시 해제. 비어있으면 no-op.
     func acknowledgeHighlight(_ kind: PetKind) {
         if pendingHighlights.contains(kind) {

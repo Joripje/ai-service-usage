@@ -221,6 +221,18 @@ actor RankingAPI {
         let githubToken: String
         let newDeviceId: String
     }
+    struct PeekByGitHubRequest: Encodable {
+        let githubToken: String
+    }
+    /// peek-by-github 응답 — 복원 전 컨펌 다이얼로그에 표시할 메타데이터.
+    /// 서버는 이 호출에서 변경을 만들지 않는다. 실제 hmac_key rotation은 별도 recover 호출에서.
+    struct GitHubAccountPeek: Decodable, Sendable, Equatable {
+        let nickname: String
+        let totalCoins: Int
+        /// 마지막 백업 시점 (last_submitted_at, 없으면 registered_at).
+        let backupAt: Date
+        let githubLogin: String
+    }
     struct RecoverResponse: Decodable {
         /// 서버측 권위 있는 device_id. 클라이언트가 보낸 newDeviceId는 무시되고 기존 값이
         /// 반환됨 → 클라이언트는 이걸 받아 로컬 `rankingDeviceID`에 저장해야 함. 서버측
@@ -229,6 +241,9 @@ actor RankingAPI {
         let hmacKey: String
         let nickname: String
         let totalCoins: Int
+        /// 백업 복원용 — `ProfileState.backup`에 펫 인벤토리·코인 잔액·설정이 들어있음.
+        /// 옛 서버 또는 등록 시점에 아직 profileJson을 안 보낸 사용자는 nil.
+        let profileJson: ProfileState?
     }
 
     // MARK: - Errors
@@ -312,6 +327,18 @@ actor RankingAPI {
         let req = RecoverByGitHubRequest(githubToken: token, newDeviceId: newDeviceId)
         do {
             return try await post(path: "recover-by-github", body: req, signed: false)
+        } catch RankingError.http(404, _) {
+            throw RankingError.invalidRecoveryCode
+        }
+    }
+
+    /// 복원 전 컨펌용 — 토큰으로 매칭되는 계정 메타(닉네임·코인·마지막 백업 시점) 조회만. 변경 없음.
+    /// 호출 후 사용자에게 "X 시점으로 복원하시겠습니까?" 다이얼로그를 띄우고, OK 클릭 시
+    /// `recoverWithGitHub`로 진행한다.
+    func peekGitHubAccount(token: String) async throws -> GitHubAccountPeek {
+        let req = PeekByGitHubRequest(githubToken: token)
+        do {
+            return try await post(path: "peek-by-github", body: req, signed: false)
         } catch RankingError.http(404, _) {
             throw RankingError.invalidRecoveryCode
         }

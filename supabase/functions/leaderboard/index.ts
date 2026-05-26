@@ -8,6 +8,16 @@ import { isValidUUID } from "../_shared/validation.ts";
 
 const TOP_N = 100;
 
+// profile_json.backup은 본인 복구용 — 다른 사용자에게 노출되면 안 됨.
+// leaderboard/previousMonth 응답에서 모두 제거.
+function stripBackup(pj: unknown): unknown {
+  if (pj && typeof pj === "object" && pj !== null && "backup" in pj) {
+    const { backup: _drop, ...rest } = pj as Record<string, unknown>;
+    return rest;
+  }
+  return pj;
+}
+
 Deno.serve(async (req: Request) => {
   const preflight = handleOptions(req);
   if (preflight) return preflight;
@@ -71,7 +81,7 @@ Deno.serve(async (req: Request) => {
     nickname: row.nickname,
     totalCoins: row.monthly_coins,
     githubLogin: row.github_login,
-    profileJson: row.profile_json,
+    profileJson: stripBackup(row.profile_json),
   }));
 
   // 직전 달 명예의 전당 — 가장 최근 finalized period의 top 3.
@@ -95,7 +105,7 @@ Deno.serve(async (req: Request) => {
         nickname: w.nickname_snapshot,
         totalCoins: w.final_score,
         githubLogin: null,
-        profileJson: w.profile_json_snapshot,
+        profileJson: stripBackup(w.profile_json_snapshot),
         rewardCoins: w.reward_coins,
       })),
     };
