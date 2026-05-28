@@ -1,0 +1,9 @@
+# gitleaks false-positive 화이트리스트.
+# 각 라인은 `<commit-sha>:<path>:<rule-id>:<line>` 형식 fingerprint.
+# 추가 시 반드시 사유 코멘트를 함께 둘 것 (왜 false positive 인지).
+
+# docs/SETUP_RANKING.md:129 — `SUPABASE_ANON_KEY="<anon key from Step 1>"`
+# 플레이스홀더 텍스트. 실제 키가 아니라 사용자에게 입력 위치를 안내하는 문서.
+# Supabase anon key 는 클라이언트에 노출되어도 안전한 값 (RLS 가 권한 통제) —
+# 같은 파일 132 줄에 명시되어 있음.
+c2873d72cb1a7780bbf064498e3e3e35458d1357:docs/SETUP_RANKING.md:generic-api-key:129
