@@ -185,19 +185,26 @@ final class Settings: ObservableObject {
     @Published var lastClaudeSevenDayPctSeen: Double? {
         didSet { UserDefaults.standard.set(lastClaudeSevenDayPctSeen, forKey: Keys.lastClaudeSevenDayPctSeen) }
     }
-    // Codex 5h/7d 윈도우 적립용 — Claude와 동일한 (resetAt, pctSeen) state machine.
-    // free(monthly)는 코인 적립 대상 아님(Plus/Pro만) → monthly state는 두지 않는다.
+    // Codex 5h/7d/monthly 윈도우 적립용 — Claude와 동일한 (resetAt, pctSeen) state machine.
+    // monthly는 free 전용 단일 창(Plus/Pro는 5h/7d만 옴). Claude/Cursor Free와 형평을 맞추려고
+    // monthly도 적립 대상에 포함 → monthly state machine을 별도로 둔다.
     @Published var lastCodexFiveHourReset: Date? {
         didSet { UserDefaults.standard.set(lastCodexFiveHourReset, forKey: Keys.lastCodexFiveHourReset) }
     }
     @Published var lastCodexSevenDayReset: Date? {
         didSet { UserDefaults.standard.set(lastCodexSevenDayReset, forKey: Keys.lastCodexSevenDayReset) }
     }
+    @Published var lastCodexMonthlyReset: Date? {
+        didSet { UserDefaults.standard.set(lastCodexMonthlyReset, forKey: Keys.lastCodexMonthlyReset) }
+    }
     @Published var lastCodexFiveHourPctSeen: Double? {
         didSet { UserDefaults.standard.set(lastCodexFiveHourPctSeen, forKey: Keys.lastCodexFiveHourPctSeen) }
     }
     @Published var lastCodexSevenDayPctSeen: Double? {
         didSet { UserDefaults.standard.set(lastCodexSevenDayPctSeen, forKey: Keys.lastCodexSevenDayPctSeen) }
+    }
+    @Published var lastCodexMonthlyPctSeen: Double? {
+        didSet { UserDefaults.standard.set(lastCodexMonthlyPctSeen, forKey: Keys.lastCodexMonthlyPctSeen) }
     }
     /// 정수 절단으로 코인이 새지 않도록 폴링마다의 소수부를 누적해서 carry.
     /// (예: 0.835 coin/poll × 60 polls 가 50 coin로 누적되도록)
@@ -215,6 +222,9 @@ final class Settings: ObservableObject {
     }
     @Published var codexSevenDayCoinFraction: Double {
         didSet { UserDefaults.standard.set(codexSevenDayCoinFraction, forKey: Keys.codexSevenDayCoinFraction) }
+    }
+    @Published var codexMonthlyCoinFraction: Double {
+        didSet { UserDefaults.standard.set(codexMonthlyCoinFraction, forKey: Keys.codexMonthlyCoinFraction) }
     }
     /// CoinLedger가 처리한 마지막 Cursor 이벤트 timestamp (그 이후만 적립 대상).
     @Published var lastCursorEventCredited: Date? {
@@ -556,10 +566,13 @@ final class Settings: ObservableObject {
         self.cursorCoinFraction = (d.object(forKey: Keys.cursorCoinFraction) as? Double) ?? 0
         self.lastCodexFiveHourReset = d.object(forKey: Keys.lastCodexFiveHourReset) as? Date
         self.lastCodexSevenDayReset = d.object(forKey: Keys.lastCodexSevenDayReset) as? Date
+        self.lastCodexMonthlyReset = d.object(forKey: Keys.lastCodexMonthlyReset) as? Date
         self.lastCodexFiveHourPctSeen = d.object(forKey: Keys.lastCodexFiveHourPctSeen) as? Double
         self.lastCodexSevenDayPctSeen = d.object(forKey: Keys.lastCodexSevenDayPctSeen) as? Double
+        self.lastCodexMonthlyPctSeen = d.object(forKey: Keys.lastCodexMonthlyPctSeen) as? Double
         self.codexFiveHourCoinFraction = (d.object(forKey: Keys.codexFiveHourCoinFraction) as? Double) ?? 0
         self.codexSevenDayCoinFraction = (d.object(forKey: Keys.codexSevenDayCoinFraction) as? Double) ?? 0
+        self.codexMonthlyCoinFraction = (d.object(forKey: Keys.codexMonthlyCoinFraction) as? Double) ?? 0
         self.lastCursorEventCredited = d.object(forKey: Keys.lastCursorEventCredited) as? Date
         self.coinsTotalEarned = (d.object(forKey: Keys.coinsTotalEarned) as? Int) ?? 0
         self.firstCreditedAt = d.object(forKey: Keys.firstCreditedAt) as? Date
@@ -1087,10 +1100,13 @@ final class Settings: ObservableObject {
         static let cursorCoinFraction          = "settings.cursorCoinFraction"
         static let lastCodexFiveHourReset      = "settings.lastCodexFiveHourReset"
         static let lastCodexSevenDayReset      = "settings.lastCodexSevenDayReset"
+        static let lastCodexMonthlyReset       = "settings.lastCodexMonthlyReset"
         static let lastCodexFiveHourPctSeen    = "settings.lastCodexFiveHourPctSeen"
         static let lastCodexSevenDayPctSeen    = "settings.lastCodexSevenDayPctSeen"
+        static let lastCodexMonthlyPctSeen     = "settings.lastCodexMonthlyPctSeen"
         static let codexFiveHourCoinFraction   = "settings.codexFiveHourCoinFraction"
         static let codexSevenDayCoinFraction   = "settings.codexSevenDayCoinFraction"
+        static let codexMonthlyCoinFraction    = "settings.codexMonthlyCoinFraction"
         static let hasCompletedGachaMigration  = "settings.hasCompletedGachaMigration"
         static let coinsTotalEarned            = "settings.coinsTotalEarned"
         static let firstCreditedAt             = "settings.firstCreditedAt"

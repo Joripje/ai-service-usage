@@ -38,6 +38,7 @@ enum UsageSource: String, Codable, Sendable {
     case cursorBusinessRequests
     case codexFiveHour          // Codex Plus/Pro 5h 윈도우 pct delta
     case codexSevenDay          // Codex Plus/Pro 7d 윈도우 pct delta
+    case codexMonthly           // Codex Free monthly 윈도우 pct delta
 
     enum VibeCategory { case claude, cursor, codex }
 
@@ -47,7 +48,7 @@ enum UsageSource: String, Codable, Sendable {
         case .claudeFiveHour, .claudeSevenDay: return .claude
         case .cursorUltra, .cursorProRequests, .cursorFreeRequests, .cursorBusinessRequests:
             return .cursor
-        case .codexFiveHour, .codexSevenDay: return .codex
+        case .codexFiveHour, .codexSevenDay, .codexMonthly: return .codex
         }
     }
 
@@ -66,6 +67,7 @@ enum UsageSource: String, Codable, Sendable {
             return \.cursorCoinFraction
         case .codexFiveHour: return \.codexFiveHourCoinFraction
         case .codexSevenDay: return \.codexSevenDayCoinFraction
+        case .codexMonthly:  return \.codexMonthlyCoinFraction
         }
     }
 }
@@ -137,9 +139,10 @@ enum UsageEventProducer {
         }
     }
 
-    /// Codex 스냅샷 ingest — Plus/Pro의 5h/7d 두 윈도우를 ingestClaude와 동일한 pct-delta 모델로 적립.
-    /// free의 monthly 창은 적립 대상 아님(fiveHourPct/sevenDayPct가 nil이라 자연스럽게 skip).
-    /// coinFactor = codexPlanMultiplier(Plus 1.0 / Pro 2.5), vpFactor = codexPlanPriceVP / maxPureCoin.
+    /// Codex 스냅샷 ingest — Plus/Pro의 5h/7d, free의 monthly 창을 ingestClaude와 동일한 pct-delta
+    /// 모델로 적립. 세 창은 plan별로 상호배타라(Plus/Pro는 5h/7d만, free는 monthly만 옴 — CodexAPI
+    /// 파싱 참조) 같은 폴에서 둘 이상 적립되는 일은 없다 → 이중적립 위험 없음.
+    /// coinFactor = codexPlanMultiplier(Plus 1.0 / Pro 2.5 / free 0.5), vpFactor = codexPlanPriceVP / maxPureCoin.
     static func ingestCodex(_ snapshot: CodexSnapshot) {
         let context = UsageContext(
             planName: snapshot.planName,
@@ -155,6 +158,13 @@ enum UsageEventProducer {
             ingestWindow(pct: pct, resetAt: resetAt, source: .codexSevenDay,
                          maxCoin: CoinLedger.codexSevenDayMaxCoin, context: context,
                          lastResetKey: \.lastCodexSevenDayReset, lastPctKey: \.lastCodexSevenDayPctSeen)
+        }
+        // free 전용 monthly 단일 창 — Claude/Cursor Free와 형평을 맞추려고 적립 대상에 포함.
+        // maxCoin = codexMonthlyMaxCoin(4578)이라 월 풀 사용 시 VP ≈ 500 (free 가격 cents).
+        if let resetAt = snapshot.monthlyResetAt, let pct = snapshot.monthlyPct {
+            ingestWindow(pct: pct, resetAt: resetAt, source: .codexMonthly,
+                         maxCoin: CoinLedger.codexMonthlyMaxCoin, context: context,
+                         lastResetKey: \.lastCodexMonthlyReset, lastPctKey: \.lastCodexMonthlyPctSeen)
         }
     }
 

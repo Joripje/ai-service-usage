@@ -77,6 +77,11 @@ final class CoinLedger: UsageConsumer {
     /// Codex 5h/7d 윈도우 만점 coin — Claude와 동일 스케일(30/60).
     static let codexFiveHourMaxCoin: Double     = 30
     static let codexSevenDayMaxCoin: Double     = 60
+    /// Codex free monthly 창 만점 coin. `claudeMaxPureCoinPerMonth`(4578)와 동일 값으로 잡아
+    /// 월 풀 사용 시 pureValue 합이 4578 → VP = 4578 × (codexPlanPriceVP("free")=500 / 4578) = 500,
+    /// Claude/Cursor Free(~500 VP)와 형평. 5h/7d(30/60)와 스케일이 다른 건 의도 — monthly는 한 달에
+    /// 한 번만 0→100% 채우는 단일 창이라 만점이 곧 한 달치 전체다.
+    static let codexMonthlyMaxCoin: Double      = claudeMaxPureCoinPerMonth
 
     /// 누적 % 위치 → 누적 coin 비율. 0/1은 고정, 중간은 concave (sqrt). 초반 적립률↑.
     nonisolated static func curve(_ x: Double) -> Double {
