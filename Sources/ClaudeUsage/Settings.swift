@@ -299,6 +299,11 @@ final class Settings: ObservableObject {
     @Published var creditedBadgeRewards: Set<String> {
         didSet { persist(creditedBadgeRewards, forKey: Keys.creditedBadgeRewards) }
     }
+    /// 마스터한 지역(BadgeRegion.rawValue)의 집합. 한 지역의 모든 도장 클리어 시 1회 프리미엄
+    /// 가챠권 지급 — dedup용. 한 번 들어가면 영구. (clearedBadges/completedCollections와 동일 패턴.)
+    @Published var masteredRegions: Set<String> {
+        didSet { persist(masteredRegions, forKey: Keys.masteredRegions) }
+    }
     /// 챔피언 뱃지(33번째) 획득 시각. nil = 미획득.
     @Published var championBadgeEarnedAt: Date? {
         didSet { UserDefaults.standard.set(championBadgeEarnedAt, forKey: Keys.championBadgeEarnedAt) }
@@ -650,6 +655,7 @@ final class Settings: ObservableObject {
             }
         }
         self.championBadgeEarnedAt = d.object(forKey: Keys.championBadgeEarnedAt) as? Date
+        self.masteredRegions = (d.data(forKey: Keys.masteredRegions).flatMap { try? JSONDecoder().decode(Set<String>.self, from: $0) }) ?? []
         self.hasViewedGymPage      = (d.object(forKey: Keys.hasViewedGymPage) as? Bool) ?? false
 
         // 펫 컬렉션 (셋 보너스) 로드
@@ -830,9 +836,16 @@ final class Settings: ObservableObject {
     /// `BadgeRegistry`처럼 `Settings.shared`를 재진입하므로 init 안에서 호출 금지 — App 시작 후 호출.
     func applyCollectionMigrationIfNeeded() {
         let d = UserDefaults.standard
-        guard !d.bool(forKey: Keys.hasMigratedCollectionBonuses) else { return }
-        PetCollectionRegistry.evaluate(silent: true)
-        d.set(true, forKey: Keys.hasMigratedCollectionBonuses)
+        if !d.bool(forKey: Keys.hasMigratedCollectionBonuses) {
+            PetCollectionRegistry.evaluate(silent: true)
+            d.set(true, forKey: Keys.hasMigratedCollectionBonuses)
+        }
+        // On-Call(v0.12.x 신규 컬렉션) 추가 후 1회 재평가 — 이미 멤버를 다 모은 기존 사용자 소급 보너스.
+        // evaluate는 completedCollections 미포함 + 완성된 것만 처리하므로 재호출은 안전(중복 지급 없음).
+        if !d.bool(forKey: Keys.hasReevaluatedOnCall) {
+            PetCollectionRegistry.evaluate(silent: true)
+            d.set(true, forKey: Keys.hasReevaluatedOnCall)
+        }
     }
 
     /// 컬렉션 뱃지 클릭 시 호출 — 그 컬렉션의 강조 표시 해제. 비어있으면 no-op.
@@ -1031,6 +1044,7 @@ final class Settings: ObservableObject {
         if let remote = b.creditedPRNumbers { creditedPRNumbers.formUnion(remote) }
         if let remote = b.completedCollections { completedCollections.formUnion(remote) }
         if let remote = b.clearedBadges { clearedBadges.formUnion(remote) }
+        if let remote = b.masteredRegions { masteredRegions.formUnion(remote) }
         if let remote = b.ownedTitles { ownedTitles.formUnion(remote) }
 
         // 사용자 설정 — backup 의도 우선.
@@ -1174,6 +1188,7 @@ final class Settings: ObservableObject {
         static let heartbeatLastActiveAt       = "settings.heartbeatLastActiveAt"
         static let nightOwlSecondsAccumulated  = "settings.nightOwlSecondsAccumulated"
         static let clearedBadges               = "settings.clearedBadges"
+        static let masteredRegions             = "settings.masteredRegions"
         static let creditedBadgeRewards        = "settings.creditedBadgeRewards"
         static let championBadgeEarnedAt       = "settings.championBadgeEarnedAt"
         static let hasViewedGymPage            = "settings.hasViewedGymPage"
@@ -1184,6 +1199,7 @@ final class Settings: ObservableObject {
         static let pendingCollectionCelebration = "settings.pendingCollectionCelebration"
         static let pendingCollectionHighlights = "settings.pendingCollectionHighlights"
         static let hasMigratedCollectionBonuses = "settings.hasMigratedCollectionBonuses"
+        static let hasReevaluatedOnCall = "settings.hasReevaluatedOnCall"
         // 트레이너 카드 (Report 탭)
         static let trainerID                   = "settings.trainerID"
         static let trainerCard                 = "settings.trainerCard"
