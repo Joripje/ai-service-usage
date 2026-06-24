@@ -312,7 +312,9 @@ private struct LeaderboardRowView: View {
                     collections: profile.collectionRowsForRender(),
                     showWatermark: false,
                     width: 460,
-                    medals: entry.medals
+                    medals: entry.medals,
+                    animatedAvatar: true,
+                    equippedEffects: Set((profile.equippedEffects ?? []).compactMap { EffectKind(rawValue: $0) })
                 )
                 .padding(8)
             } else {
