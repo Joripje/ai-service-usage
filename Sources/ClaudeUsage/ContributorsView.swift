@@ -7,6 +7,9 @@ import SwiftUI
 @MainActor
 struct ContributorsPageView: View {
     @ObservedObject var contributors: Contributors
+    /// github_login(소문자) → 그 사람의 리더보드 엔트리(트레이너 카드 프로필 포함). top-100에서 매핑.
+    /// 매칭되면 호버 시 진짜 트레이너 카드 + 실제 대표펫, 매칭 안 되면 기여자 카드 + 여우.
+    @State private var trainerEntries: [String: RankingAPI.LeaderboardEntry] = [:]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -17,6 +20,24 @@ struct ContributorsPageView: View {
             footer
         }
         .frame(width: 460, height: 540)
+        .task { await loadTrainerEntries() }
+    }
+
+    /// 리더보드 top-100에서 github_login → 엔트리 맵을 만든다. 기여자를 실제 랭킹 프로필과
+    /// 매칭하기 위함 — 매칭 안 된 기여자(외부자·랭킹 미참여 등)는 카드 측에서 여우/기여자 카드로 fallback.
+    private func loadTrainerEntries() async {
+        guard RankingAPI.isConfigured else { return }
+        let dev = Settings.shared.rankingDeviceID
+        do {
+            let board = try await RankingAPI.shared.fetchLeaderboard(deviceId: dev.isEmpty ? nil : dev)
+            var map: [String: RankingAPI.LeaderboardEntry] = [:]
+            for e in board.entries {
+                if let gh = e.githubLogin?.lowercased() { map[gh] = e }
+            }
+            trainerEntries = map
+        } catch {
+            DebugLog.log("Contributors 트레이너 엔트리 매핑 실패: \(error)")
+        }
     }
 
     private var header: some View {
@@ -57,7 +78,8 @@ struct ContributorsPageView: View {
             ScrollView {
                 LazyVStack(spacing: 8) {
                     ForEach(Array(contributors.list.enumerated()), id: \.element.id) { idx, c in
-                        ContributorCardView(contributor: c, rank: idx)
+                        ContributorCardView(contributor: c, rank: idx,
+                                            entry: trainerEntries[c.login.lowercased()])
                     }
                 }
                 .padding(16)
@@ -93,10 +115,14 @@ struct ContributorsPageView: View {
 private struct ContributorCardView: View {
     let contributor: Contributor
     let rank: Int
+    /// 리더보드에서 매칭된 랭킹 엔트리(트레이너 카드 프로필 포함). 매칭 안 된 기여자는 nil.
+    let entry: RankingAPI.LeaderboardEntry?
     @State private var expanded: Bool = false
+    @State private var showCard: Bool = false
 
     private var rarity: Rarity { ContributorRanking.rarity(forRank: rank) }
-    private var petKind: PetKind? { ContributorRanking.pet(for: rarity, login: contributor.login) }
+    /// 대표펫 = 매칭된 트레이너 카드 아바타 펫, 없으면 기본 펫(여우).
+    private var pet: PetSelection { entry?.profileJson?.card.avatar ?? PetSelection(kind: .fox, variant: 0) }
     private var rarityColor: Color { ContributorRanking.color(for: rarity) }
 
     var body: some View {
@@ -163,13 +189,15 @@ private struct ContributorCardView: View {
                 .fill(rarityColor.opacity(0.15))
             Circle()
                 .stroke(rarityColor.opacity(rank < 3 ? 0.8 : 0.4), lineWidth: 1)
-            if let kind = petKind, let img = PetSprite.image(for: kind, action: .walk, frameIndex: 0) {
+            if let img = PetSprite.image(for: pet.kind, action: .walk, frameIndex: 0) {
                 Image(nsImage: img)
                     .resizable()
                     .interpolation(.none)
                     .scaledToFit()
                     .frame(width: 28, height: 28)
-                    .scaleEffect(x: kind.defaultFacingLeft ? -1 : 1, y: 1)
+                    .scaleEffect(x: pet.kind.defaultFacingLeft ? -1 : 1, y: 1)
+                    .hueRotation(.degrees(pet.variant == 0 ? 0 : WalkingCat.hueDegrees(for: pet.variant)))
+                    .saturation(pet.variant == 0 ? 1.0 : 1.15)
             } else {
                 Text(String(rarity.displayName.prefix(1)))
                     .font(.system(size: 14, weight: .bold))
@@ -177,7 +205,31 @@ private struct ContributorCardView: View {
             }
         }
         .frame(width: 36, height: 36)
-        .help("\(rarity.displayName) · \(contributor.prs.count)개 PR")
+        // 대표펫 호버 → 카드 popover (랭킹 행과 동일한 hover→카드 UX).
+        // 매칭된 기여자(랭킹 프로필 보유)는 진짜 트레이너 카드, 아니면 기여자 카드(여우) fallback.
+        .contentShape(Circle())
+        .onHover { showCard = $0 }
+        .popover(isPresented: $showCard, arrowEdge: .leading) {
+            if let entry, let profile = entry.profileJson {
+                TrainerCardView(
+                    card: profile.card,
+                    trainerID: profile.trainerID,
+                    trainerName: entry.nickname,
+                    stats: profile.stats,
+                    badges: profile.badgeRowsForRender(),
+                    collections: profile.collectionRowsForRender(),
+                    showWatermark: false,
+                    width: 440,
+                    medals: entry.medals,
+                    animatedAvatar: true,
+                    equippedEffects: Set((profile.equippedEffects ?? []).compactMap { EffectKind(rawValue: $0) })
+                )
+                .padding(8)
+            } else {
+                ContributorReportCard(contributor: contributor, rank: rank,
+                                      pet: pet, rarity: rarity, rarityColor: rarityColor)
+            }
+        }
     }
 
     private var metaText: String {
@@ -222,6 +274,87 @@ private struct ContributorCardView: View {
 }
 
 @MainActor
+/// 기여자 대표펫 호버 시 뜨는 레포트카드 — 큰 대표펫(등급 프레임) + GitHub 아바타 + login +
+/// 등급 + 기여 PR. 랭킹 행 트레이너 카드 popover와 동일한 hover→카드 UX. 기여자는 랭킹 프로필이
+/// 없어 카드 내용은 대표펫·등급·PR 로 구성(빈 통계가 노출되는 트레이너 카드 재사용 대신).
+private struct ContributorReportCard: View {
+    let contributor: Contributor
+    let rank: Int
+    let pet: PetSelection
+    let rarity: Rarity
+    let rarityColor: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 14) {
+                petAvatar
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 6) {
+                        AvatarView(url: contributor.avatarURL, size: 22)
+                        Text("@\(contributor.login)")
+                            .font(.system(size: 14, weight: .semibold))
+                            .lineLimit(1)
+                    }
+                    Text(rarity.displayName)
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(rarityColor)
+                        .padding(.horizontal, 8).padding(.vertical, 2)
+                        .background(Capsule().fill(rarityColor.opacity(0.16)))
+                    Text("대표펫 · \(PetMetaStore.shared.displayName(for: pet.kind))")
+                        .font(.system(size: 10)).foregroundStyle(.secondary)
+                    Text("기여 PR \(contributor.prs.count)개")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                Spacer(minLength: 0)
+            }
+            if !contributor.prs.isEmpty {
+                Divider()
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("최근 기여")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    ForEach(contributor.prs.prefix(3), id: \.number) { pr in
+                        HStack(spacing: 6) {
+                            Text("#\(pr.number)")
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                            Text(pr.title)
+                                .font(.system(size: 11))
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .frame(width: 300)
+    }
+
+    /// 큰 대표펫 — 등급 색 프레임. sprite 로드 실패 시 등급 이니셜.
+    private var petAvatar: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 12).fill(rarityColor.opacity(0.14))
+            RoundedRectangle(cornerRadius: 12).stroke(rarityColor.opacity(0.8), lineWidth: 2)
+            if let img = PetSprite.image(for: pet.kind, action: .walk, frameIndex: 0) {
+                Image(nsImage: img)
+                    .resizable()
+                    .interpolation(.none)
+                    .scaledToFit()
+                    .frame(width: 60, height: 60)
+                    .scaleEffect(x: pet.kind.defaultFacingLeft ? -1 : 1, y: 1)
+                    .hueRotation(.degrees(pet.variant == 0 ? 0 : WalkingCat.hueDegrees(for: pet.variant)))
+                    .saturation(pet.variant == 0 ? 1.0 : 1.15)
+            } else {
+                Text(String(rarity.displayName.prefix(1)))
+                    .font(.system(size: 26, weight: .bold))
+                    .foregroundStyle(rarityColor)
+            }
+        }
+        .frame(width: 84, height: 84)
+    }
+}
+
 private struct AvatarView: View {
     let url: String?
     let size: CGFloat
@@ -266,16 +399,6 @@ enum ContributorRanking {
         }
     }
 
-    /// rarity 풀에서 login 기반 deterministic 픽. `String.hashValue`는 process마다 달라져
-    /// 앱 재시작 시 펫이 바뀌므로 stable djb2 해시 사용.
-    @MainActor
-    static func pet(for rarity: Rarity, login: String) -> PetKind? {
-        let pool = Gacha.pool[rarity] ?? []
-        guard !pool.isEmpty else { return nil }
-        let h = stableHash(login)
-        return pool[h % pool.count]
-    }
-
     nonisolated static func color(for rarity: Rarity) -> Color {
         switch rarity {
         case .mythic:    return Color(red: 0.86, green: 0.08, blue: 0.24)  // 진홍
@@ -284,13 +407,6 @@ enum ContributorRanking {
         case .rare:      return Color(red: 0.30, green: 0.62, blue: 0.96)  // 파랑
         case .common:    return Color.secondary
         }
-    }
-
-    /// djb2 — 같은 입력에 대해 process/플랫폼 무관하게 동일 정수.
-    nonisolated static func stableHash(_ s: String) -> Int {
-        var h: UInt64 = 5381
-        for byte in s.utf8 { h = ((h << 5) &+ h) &+ UInt64(byte) }
-        return Int(h & UInt64(Int.max))
     }
 }
 
